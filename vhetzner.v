@@ -221,13 +221,67 @@ pub fn (s ServerManager) disks_list() ![]string {
 	return disks
 }
 
-pub fn (s ServerManager) disk_erase(path string) !bool {
+pub fn (s ServerManager) disk_erase(disk string) bool {
 	// make it safe via wipefs
-	r := os.execute("wipefs -a $path")
+	r := os.execute("wipefs -a /dev/$disk")
 	if r.exit_code != 0 {
 		println(r.output)
 		return false
 	}
+
+	return true
+}
+
+pub fn (s ServerManager) disk_partitions(disk string) ![]string {
+	mut files := os.ls("/sys/class/block/$disk")!
+	mut parts := []string{}
+
+	files.sort()
+	for file in files {
+		if file.starts_with(disk) {
+			parts << file
+		}
+	}
+
+	return parts
+}
+
+pub fn (s ServerManager) disk_main_layout(disk string) !bool {
+	os.execute("parted /dev/$disk mklabel msdos")
+	os.execute("parted -a optimal /dev/$disk mkpart primary 0% 768MB")
+	os.execute("parted -a optimal /dev/$disk mkpart primary 768MB 100GB")
+	os.execute("parted -a optimal /dev/$disk mkpart primary linux-swap 100GB 104GB")
+	os.execute("parted -a optimal /dev/$disk mkpart primary 104GB 100%")
+
+	os.execute("partprobe")
+
+	parts := s.disk_partitions(disk)!
+	if parts.len < 4 {
+		return error("partitions found doesn't match expected map")
+	}
+
+	boot := "/dev/" + parts[0]
+	root := "/dev/" + parts[1]
+	swap := "/dev/" + parts[2]
+	more := "/dev/" + parts[3]
+
+	println("[+] partition map:")
+	println("[+]   /       -> $root  [ext2]")
+	println("[+]   /boot   -> $boot  [ext4]")
+	println("[+]   [swap]  -> $swap  [swap]")
+	println("[+]   [extra] -> $more  [btrfs]")
+
+	println("[+] creating boot partition")
+	os.execute("mkfs.ext2 $boot")
+
+	println("[+] creating root partition")
+	os.execute("mkfs.ext4 $root")
+
+	println("[+] creating swap partition")
+	os.execute("mkswap $swap")
+
+	println("[+] creating storage partition")
+	os.execute("mkfs.btrfs -f $more")
 
 	return true
 }
@@ -292,14 +346,21 @@ fn main() {
 	sm := newsm()
 	
 	// stopping existing raid
+	println("[+] stopping raid")
 	md := sm.raid_stop()!
 	println(md)
 
 	// listing disks
+	println("[+] listing disks")
 	disks := sm.disks_list()!
 	println(disks)
 
 	for disk in disks {
-		sm.disk_erase("/dev/$disk")!
+		println("[+] erasing disk: $disk")
+		sm.disk_erase(disk)
 	}
+
+	main := disks[0]
+	println("[+] creating main layout on disk: $main")
+	sm.disk_main_layout(main)!
 }
