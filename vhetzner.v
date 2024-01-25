@@ -53,6 +53,26 @@ struct RescueRoot {
 	rescue Rescue
 }
 
+struct Reset {
+	server_ip string
+    server_ipv6_net string
+    server_number int
+    // type string // FIXME
+    operating_status string
+}
+
+struct ResetRoot {
+	reset Reset
+}
+
+struct Boot {
+	rescue Rescue
+}
+
+struct BootRoot {
+	boot Boot
+}
+
 pub fn new(user string, pass string, base string) Hetzner {
 	challenge := user + ":" + pass
 	auth := base64.encode(challenge.bytes())
@@ -120,6 +140,98 @@ pub fn (h Hetzner) server_rescue(id int) !RescueRoot {
 	return rescue
 }
 
+pub fn (h Hetzner) server_reset(id int) !ResetRoot {
+	response := h.request_post("/reset/$id", "type=hw")!
+
+	if response.status_code != 200 {
+		return error("could not process request: error $response.status_code $response.body")
+	}
+
+	rescue := json.decode(ResetRoot, response.body) or {
+		return error("could not process request")
+	}
+
+	return rescue
+}
+
+pub fn (h Hetzner) server_boot(id int) !BootRoot {
+	response := h.request_get("/boot/$id")!
+
+	if response.status_code != 200 {
+		return error("could not process request: error $response.status_code $response.body")
+	}
+
+	boot := json.decode(BootRoot, response.body) or {
+		return error("could not process request: $err")
+	}
+
+	return boot
+}
+
+
+struct ServerManager {
+	root string
+}
+
+pub fn newsm() ServerManager {
+	sm := ServerManager{}
+	return sm
+}
+
+pub fn (s ServerManager) raid_stop() !bool {
+	if !os.exists("/proc/mdstat") {
+		return false
+	}
+
+	md := os.read_file("/proc/mdstat")!
+	lines := md.split_into_lines()
+
+	for line in lines {
+		if line.contains("active") {
+			dev := line.split(" ")[0]
+			println("[+] stopping raid device: $dev")
+
+			r := os.execute("mdadm --stop /dev/$dev")
+			if r.exit_code != 0 {
+				println(r.output)
+			}
+		}
+	}
+
+	return true
+}
+
+pub fn (s ServerManager) disks_list() ![]string {
+	blocks := os.ls("/sys/class/block")!
+	mut disks := []string{}
+
+	for block in blocks {
+		if os.is_link("/sys/class/block/$block/device") {
+			// discard cdrom
+			events := os.read_file("/sys/class/block/$block/events")!
+			if events.contains("eject") {
+				continue
+			}
+
+			// that should be good
+			disks << block
+		}
+	}
+
+	return disks
+}
+
+pub fn (s ServerManager) disk_erase(path string) !bool {
+	// make it safe via wipefs
+	r := os.execute("wipefs -a $path")
+	if r.exit_code != 0 {
+		println(r.output)
+		return false
+	}
+
+	return true
+}
+
 fn main() {
 	mut base := os.getenv("hetzner_base")
 	user := os.getenv("hetzner_user")
@@ -142,6 +254,7 @@ fn main() {
 		exit(1)
 	}
 
+	/*
 	name := os.args[1]
 	println("[+] checking for server $name")
 
@@ -161,9 +274,32 @@ fn main() {
 	if srvid == 0 {
 		panic("could not find server")
 	}
+	*/
 
+	/*
 	println("[+] request rescue mode")
 
 	resc := he.server_rescue(srvid)!
 	println(resc)
+	*/
+
+	/*
+	println("[+] fetching server information")
+	boot := he.server_boot(srvid)!
+	println(boot)
+	*/
+
+	sm := newsm()
+	
+	// stopping existing raid
+	md := sm.raid_stop()!
+	println(md)
+
+	// listing disks
+	disks := sm.disks_list()!
+	println(disks)
+
+	for disk in disks {
+		sm.disk_erase("/dev/$disk")!
+	}
 }
