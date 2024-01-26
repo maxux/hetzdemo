@@ -13,17 +13,15 @@ fn main() {
 		base = "https://robot-ws.your-server.de"
 	}
 
-	/*
-	if user == "" || pass == "" {
-		println("Missing API username and password, please set environment:")
-		println(" - hetzner_user: api username")
-		println(" - hetzner_pass: api password")
+	if os.args.len > 1 && os.args[1] == "prepare" {
+		if user == "" || pass == "" {
+			println("Missing API username and password, please set environment:")
+			println(" - hetzner_user: api username")
+			println(" - hetzner_pass: api password")
 
-		exit(1)
-	}
-	*/
+			exit(1)
+		}
 
-	if os.args[1] == "prepare" {
 		if os.args.len < 3 {
 			println("Missing target server name")
 			exit(1)
