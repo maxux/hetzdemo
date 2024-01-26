@@ -13,6 +13,9 @@ fn main() {
 		base = "https://robot-ws.your-server.de"
 	}
 
+	//
+	// prepare mode
+	//
 	if os.args.len > 1 && os.args[1] == "prepare" {
 		if user == "" || pass == "" {
 			println("Missing API username and password, please set environment:")
@@ -36,18 +39,16 @@ fn main() {
 		exit(0)
 	}
 
-	// set rescue
-	// reboot
-	// wait ssh to be ready
-	// copy this self file
-	// execute this file with special args
+	//
+	// deployment mode
+	//
 
 	sm := vserver.new()
 	
 	// stopping existing raid
 	println("[+] stopping raid")
 	md := sm.raid_stop()!
-	println(md)
+	// println(md)
 
 	// listing disks
 	println("[+] listing disks")
@@ -78,4 +79,6 @@ fn main() {
 
 	sshkey := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG7QGDSTCf+VgBLNVsdFMLYD7siK4McKy7fPkMqVZihx maxux@workx0"
 	sm.nixos_install("/dev/$main", sshkey)!
+
+	sm.nixos_finish()!
 }
