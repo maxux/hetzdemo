@@ -13,6 +13,14 @@ pub fn new() ServerManager {
 	return sm
 }
 
+fn (s ServerManager) execute(command string) bool {
+	println(command)
+	r := os.execute(command)
+	println(r)
+
+	return true
+}
+
 pub fn (s ServerManager) raid_stop() !bool {
 	if !os.exists("/proc/mdstat") {
 		return false
@@ -67,7 +75,7 @@ pub fn (s ServerManager) disk_erase(disk string) bool {
 	return true
 }
 
-pub fn (s ServerManager) disk_partitions(disk string) ![]string {
+fn (s ServerManager) disk_partitions(disk string) ![]string {
 	mut files := os.ls("/sys/class/block/$disk")!
 	mut parts := []string{}
 
@@ -81,19 +89,26 @@ pub fn (s ServerManager) disk_partitions(disk string) ![]string {
 	return parts
 }
 
-pub fn (s ServerManager) disk_main_layout(disk string) !bool {
-	os.execute("parted /dev/$disk mklabel msdos")
-	os.execute("parted -a optimal /dev/$disk mkpart primary 0% 768MB")
-	os.execute("parted -a optimal /dev/$disk mkpart primary 768MB 100GB")
-	os.execute("parted -a optimal /dev/$disk mkpart primary linux-swap 100GB 104GB")
-	os.execute("parted -a optimal /dev/$disk mkpart primary 104GB 100%")
+pub fn (s ServerManager) disk_main_layout(disk string) !map[string]string {
+	s.execute("parted /dev/$disk mklabel msdos")
+	s.execute("parted -a optimal /dev/$disk mkpart primary 0% 768MB")
+	s.execute("parted -a optimal /dev/$disk mkpart primary 768MB 100GB")
+	s.execute("parted -a optimal /dev/$disk mkpart primary linux-swap 100GB 104GB")
+	s.execute("parted -a optimal /dev/$disk mkpart primary 104GB 100%")
+	s.execute("parted /dev/$disk set 1 boot on")
 
-	os.execute("partprobe")
+	s.execute("partprobe")
 
 	parts := s.disk_partitions(disk)!
 	if parts.len < 4 {
 		return error("partitions found doesn't match expected map")
 	}
+
+	mut diskmap := map[string]string{}
+	diskmap["/"] = parts[1]
+	diskmap["/boot"] = parts[0]
+	diskmap["swap"] = parts[2]
+	diskmap["/disk1"] = parts[3]
 
 	boot := "/dev/" + parts[0]
 	root := "/dev/" + parts[1]
@@ -107,16 +122,81 @@ pub fn (s ServerManager) disk_main_layout(disk string) !bool {
 	println("[+]   [extra] -> $more  [btrfs]")
 
 	println("[+] creating boot partition")
-	os.execute("mkfs.ext2 $boot")
+	s.execute("mkfs.ext2 $boot")
 
 	println("[+] creating root partition")
-	os.execute("mkfs.ext4 $root")
+	s.execute("mkfs.ext4 $root")
 
 	println("[+] creating swap partition")
-	os.execute("mkswap $swap")
+	s.execute("mkswap $swap")
 
 	println("[+] creating storage partition")
-	os.execute("mkfs.btrfs -f $more")
+	s.execute("mkfs.btrfs -f $more")
+
+	return diskmap
+}
+
+pub fn (s ServerManager) disk_create_btrfs(disk string) !bool {
+	println("[+] creating btrfs on disk: /dev/$disk")
+	s.execute("mkfs.btrfs -f /dev/$disk")
+
+	return true
+}
+
+pub fn (s ServerManager) nixos_prepare(diskmap map[string]string) !bool {
+	// mounting 
+	println(diskmap)
+	root := diskmap["/"]
+	boot := diskmap["/boot"]
+	more := diskmap["/disk1"]
+
+	// mandatory on the host
+	println("[+] creating required user and groups")
+	s.execute("groupadd -g 30000 nixbld")
+	s.execute("useradd -u 30000 -g nixbld -G nixbld nixbld")
+
+	os.mkdir("/nix")!
+	os.mkdir("/mnt/nix")!
+
+	// mounting our extra disk for setup nix store
+	s.execute("mount /dev/$more /nix")
+	s.execute("mount /dev/$root /mnt/nix")
+	
+	os.mkdir("/mnt/nix/boot")!
+	s.execute("mount /dev/$boot /mnt/nix/boot")
+
+	return true
+}
+
+pub fn (s ServerManager) nixos_install(bootdisk string, sshkey string) !bool {
+	os.execute("curl -L https://nixos.org/nix/install | sh")
+	// . /root/.nix-profile/etc/profile.d/nix.sh
+
+	s.execute("/root/.nix-profile/bin/nix-channel --add https://nixos.org/channels/nixos-23.11 nixpkgs")
+	s.execute("/root/.nix-profile/bin/nix-channel --update")
+	s.execute("/root/.nix-profile/bin/nix-env -f '<nixpkgs>' -iA nixos-install-tools")
+	s.execute("/root/.nix-profile/bin/nixos-generate-config --root /mnt/nix/")
+
+	// /mnt/nix/etc/nixos/configuration.nix
+
+	config := '
+		boot.loader.grub.device = "$bootdisk";
+		time.timeZone = "Europe/Amsterdam";
+
+		environment.systemPackages = with pkgs; [
+			vim
+			wget
+		];
+
+		services.openssh.enable = true;
+		users.users.root.openssh.authorizedKeys.keys = [
+			"$sshkey"
+		];
+	'
+
+	os.write_file("/tmp/config-extra", config)!
+
+	// /root/.nix-profile/bin/nixos-install --root /mnt/nix
 
 	return true
 }

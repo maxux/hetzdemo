@@ -13,53 +13,36 @@ fn main() {
 		base = "https://robot-ws.your-server.de"
 	}
 
+	/*
 	if user == "" || pass == "" {
 		println("Missing API username and password, please set environment:")
 		println(" - hetzner_user: api username")
 		println(" - hetzner_pass: api password")
 
-		// exit(1)
-	}
-
-	if os.args.len < 2 {
-		println("Missing target server name")
 		exit(1)
 	}
+	*/
 
-	/*
-	name := os.args[1]
-	println("[+] checking for server $name")
-
-	he := new(user, pass, base)
-	srvs := he.servers_list()!
-
-	// println(srvs)
-	mut srvid := 0
-
-	for s in srvs {
-		if s.server.server_name == name {
-			print(s)
-			srvid = s.server.server_number
+	if os.args[1] == "prepare" {
+		if os.args.len < 3 {
+			println("Missing target server name")
+			exit(1)
 		}
+
+		name := os.args[2]
+		println("[+] preparing server: $name")
+
+		he := vhetzner.new(user, pass, base)
+		he.server_prepare(name)!
+
+		exit(0)
 	}
 
-	if srvid == 0 {
-		panic("could not find server")
-	}
-	*/
-
-	/*
-	println("[+] request rescue mode")
-
-	resc := he.server_rescue(srvid)!
-	println(resc)
-	*/
-
-	/*
-	println("[+] fetching server information")
-	boot := he.server_boot(srvid)!
-	println(boot)
-	*/
+	// set rescue
+	// reboot
+	// wait ssh to be ready
+	// copy this self file
+	// execute this file with special args
 
 	sm := vserver.new()
 	
@@ -80,5 +63,21 @@ fn main() {
 
 	main := disks[0]
 	println("[+] creating main layout on disk: $main")
-	sm.disk_main_layout(main)!
+	diskmap := sm.disk_main_layout(main)!
+
+	println("[+] creating extra btrfs storage")
+	for disk in disks {
+		if disk == main {
+			// skip main disk
+			continue
+		}
+
+		sm.disk_create_btrfs(disk)!
+	}
+
+	println("[+] preparing machine for nixos installation")
+	sm.nixos_prepare(diskmap)!
+
+	sshkey := "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIG7QGDSTCf+VgBLNVsdFMLYD7siK4McKy7fPkMqVZihx maxux@workx0"
+	sm.nixos_install("/dev/$main", sshkey)!
 }

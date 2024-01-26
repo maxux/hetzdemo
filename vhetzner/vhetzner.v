@@ -167,3 +167,34 @@ pub fn (h Hetzner) server_boot(id int) !BootRoot {
 	return boot
 }
 
+
+pub fn (h Hetzner) server_prepare(name string) !bool {
+	srvs := h.servers_list()!
+
+	// println(srvs)
+	mut srvid := 0
+
+	for s in srvs {
+		if s.server.server_name == name {
+			print(s)
+			srvid = s.server.server_number
+		}
+	}
+
+	if srvid == 0 {
+		panic("could not find server")
+	}
+
+	println("[+] request rescue mode")
+	resc := h.server_rescue(srvid)!
+	println(resc)
+
+	println("[+] fetching server information")
+	boot := h.server_boot(srvid)!
+	println(boot)
+
+	reset := h.server_reset(srvid)!
+	println(reset)
+
+	return true
+}
