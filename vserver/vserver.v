@@ -180,23 +180,36 @@ pub fn (s ServerManager) nixos_install(bootdisk string, sshkey string) !bool {
 	// /mnt/nix/etc/nixos/configuration.nix
 
 	config := '
-		boot.loader.grub.device = "$bootdisk";
-		time.timeZone = "Europe/Amsterdam";
+{ config, lib, pkgs, ... }:
 
-		environment.systemPackages = with pkgs; [
-			vim
-			wget
-		];
+{
 
-		services.openssh.enable = true;
-		users.users.root.openssh.authorizedKeys.keys = [
-			"$sshkey"
-		];
-	'
+    boot.loader.grub.device = "$bootdisk";
+    time.timeZone = "Europe/Brussels";
 
-	os.write_file("/tmp/config-extra", config)!
+    environment.systemPackages = with pkgs; [
+        vim
+        wget
+    ];
 
-	// /root/.nix-profile/bin/nixos-install --root /mnt/nix
+    services.openssh.enable = true;
+    users.users.root.openssh.authorizedKeys.keys = [
+        "$sshkey"
+    ];
+
+}
+'
+	os.write_file("/mnt/nix/etc/nixos/threefold.nix", config)!
+
+	original := os.read_file("/mnt/nix/etc/nixos/configuration.nix")!
+	updated := original.replace(
+		"./hardware-configuration.nix",
+		"./hardware-configuration.nix\n      ./threefold.nix"
+	)
+
+	os.write_file("/mnt/nix/etc/nixos/configuration.nix", updated)!
+
+	// /root/.nix-profile/bin/nixos-install --no-root-passwd --root /mnt/nix
 
 	return true
 }
